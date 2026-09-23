@@ -11,11 +11,20 @@ const token = () => randomBytes(24).toString('hex');
 const id = () => randomBytes(6).toString('base64url').toUpperCase().replace(/[^A-Z2-9]/g, '').padEnd(8, 'K').slice(0, 8);
 const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && TOKEN_RE.test(a) && TOKEN_RE.test(b) && timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 
+export function findRedisCredentials(env = process.env) {
+  const names = ['UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL',
+    ...Object.keys(env).filter(name => name.endsWith('_REST_API_URL') || name.endsWith('_REST_URL'))];
+  for (const urlName of new Set(names)) {
+    const tokenName = urlName.replace(/_URL$/, '_TOKEN');
+    if (env[urlName] && env[tokenName]) return {url: env[urlName], token: env[tokenName]};
+  }
+  return null;
+}
+
 async function redis(...args) {
-  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-  const key = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
-  if (!url || !key) throw new Error('Game storage is not configured. Add the Upstash Redis integration to this Vercel project.');
-  const response = await fetch(url, {method: 'POST', headers: {'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json'}, body: JSON.stringify(args)});
+  const credentials = findRedisCredentials();
+  if (!credentials) throw new Error('Game storage is not configured. Check the Redis environment variables in this Vercel project.');
+  const response = await fetch(credentials.url, {method: 'POST', headers: {'Authorization': `Bearer ${credentials.token}`, 'Content-Type': 'application/json'}, body: JSON.stringify(args)});
   if (!response.ok) throw new Error(`Game storage unavailable (${response.status}).`);
   const data = await response.json();
   if (data.error) throw new Error(`Game storage error: ${data.error}`);
