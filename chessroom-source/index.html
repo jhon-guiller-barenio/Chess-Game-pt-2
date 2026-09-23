@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#151a24" />
+  <meta name="description" content="Play chess with a friend from anywhere. Create a room and share the link." />
+  <title>Chessroom — Play together</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    if (location.protocol === 'file:') {
+      document.body.style.cssText = 'margin:0;background:#151a24;color:#e9ebef;font:16px/1.6 Arial,sans-serif;padding:40px 22px';
+      document.getElementById('app').innerHTML = '<main style="max-width:620px;margin:8vh auto"><div style="font-size:48px;color:#d5e57a">♞</div><h1 style="margin:10px 0 8px">Start the chess server first</h1><p>This game cannot run by opening index.html directly from your files. Extract the whole ZIP, then double-click <strong>start-windows.bat</strong> in the extracted folder. It will open the game at <strong>http://localhost:5173</strong>.</p><p style="color:#aeb8c5">You need Node.js installed. For games between different computers, deploy the project online and connect its Redis game storage.</p></main>';
+    }
+  </script>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
