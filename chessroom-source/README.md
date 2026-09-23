@@ -1,4 +1,7 @@
 <img width="537" height="415" alt="Screenshot 2026-09-23 150114" src="https://github.com/user-attachments/assets/76edee07-af5c-4635-9ad8-a46d83dd8021" />
+
+
+
 # Chessroom
 
 A two-player online chess game. White creates a room and shares its URL; Black opens it on another device and joins. Moves are validated on the server using `chess.js`. Rooms live in Upstash Redis for seven days after the latest move.
