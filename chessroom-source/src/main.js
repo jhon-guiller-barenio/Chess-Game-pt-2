@@ -1,5 +1,8 @@
 import { Chess } from 'chess.js';
 import './style.css';
+import { inject } from '@vercel/analytics';
+
+inject();
 
 const glyphs = {wk:'♔', wq:'♕', wr:'♖', wb:'♗', wn:'♘', wp:'♙', bk:'♚', bq:'♛', br:'♜', bb:'♝', bn:'♞', bp:'♟'};
 const pieceNames = {k:'king', q:'queen', r:'rook', b:'bishop', n:'knight', p:'pawn'};
