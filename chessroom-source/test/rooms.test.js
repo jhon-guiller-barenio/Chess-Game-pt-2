@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {Chess} from 'chess.js';
 import {GET, POST} from '../api/rooms.js';
 const call = async (body) => {const response = await POST(new Request('http://localhost/api/rooms', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})); return {status:response.status, data:await response.json()};};
 
@@ -35,4 +36,41 @@ test('simultaneous joins only grant one black seat', async () => {
   const {data:{room}} = await call({action:'create'});
   const results = await Promise.all([call({action:'join', roomId:room.id}),call({action:'join', roomId:room.id})]);
   assert.deepEqual(results.map(x=>x.status).sort(), [200,409]);
+});
+
+test('rematch challenges stay in the room and acceptance resets the board', async () => {
+  const {data:{room:created,playerToken:white}} = await call({action:'create'});
+  const {data:{playerToken:black}} = await call({action:'join',roomId:created.id});
+  assert.equal((await call({action:'challenge',roomId:created.id,playerToken:white})).status,409);
+  let version = 1;
+  for (const [color,from,to] of [['w','f2','f3'],['b','e7','e5'],['w','g2','g4'],['b','d8','h4']]) {
+    const result = await call({action:'move',roomId:created.id,playerToken:color === 'w' ? white:black,from,to,version});
+    assert.equal(result.status,200);
+    version = result.data.room.version;
+  }
+
+  const challenged = await call({action:'challenge',roomId:created.id,playerToken:white});
+  assert.equal(challenged.status,200);
+  assert.deepEqual(challenged.data.room.rematch,{offeredBy:'w'});
+  assert.equal((await call({action:'accept_rematch',roomId:created.id,playerToken:white})).status,403);
+  const accepted = await call({action:'accept_rematch',roomId:created.id,playerToken:black});
+  assert.equal(accepted.status,200);
+  assert.equal(accepted.data.room.id,created.id);
+  assert.equal(accepted.data.room.status,'playing');
+  assert.equal(accepted.data.room.winner,null);
+  assert.equal(accepted.data.room.rematch,null);
+  assert.deepEqual(accepted.data.room.moves,[]);
+  assert.equal(accepted.data.room.fen,new Chess().fen());
+  assert.equal(accepted.data.room.joined,true);
+});
+
+test('the challenged player may decline and a new challenge can then be sent', async () => {
+  const {data:{room,playerToken:white}} = await call({action:'create'});
+  const {data:{playerToken:black}} = await call({action:'join',roomId:room.id});
+  // Resigning provides a short legal path to a finished room.
+  await call({action:'resign',roomId:room.id,playerToken:white});
+  const offered = await call({action:'challenge',roomId:room.id,playerToken:white});
+  assert.equal(offered.status,200);
+  assert.equal((await call({action:'decline_rematch',roomId:room.id,playerToken:black})).status,200);
+  assert.equal((await call({action:'challenge',roomId:room.id,playerToken:black})).status,200);
 });

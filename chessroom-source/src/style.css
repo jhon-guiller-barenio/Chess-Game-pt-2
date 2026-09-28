@@ -3,3 +3,12 @@
 @media(max-width:1000px){.app-shell{padding:0 4%}.main-layout{grid-template-columns:minmax(0,1fr) 300px;gap:28px}.sidebar{padding-top:58px}.panel{padding:20px}}
 @media(max-width:740px){.app-shell{padding:0 16px}.topbar{height:68px}.topbar-right{display:none}.main-layout{display:flex;flex-direction:column;gap:18px;padding:29px 0 30px}.game-area,.sidebar{width:100%}.game-heading{margin-bottom:16px}.game-heading h1{font-size:29px}.game-indicator{font-size:11px}.board-wrap{max-width:560px}.board-frame{padding:4px}.piece{font-size:clamp(29px,8vw,54px)}.player-row{height:54px}.sidebar{padding-top:0}.status-panel{order:0}.moves-panel{order:1}.site-footer{font-size:9px}.site-footer span:last-child{display:none}}
 @media(max-width:390px){.game-indicator{display:none}.piece{font-size:clamp(25px,8vw,34px)}.coord{font-size:9px}.rank{left:2px;top:2px}.file{right:2px;bottom:1px}.capture-ring{border-width:3px}}
+
+/* Rematches and queued premoves */
+.square.premove-square.light{background:#e3b96e}
+.square.premove-square.dark{background:#b38648}
+.rematch-waiting,.premove-hint{margin:0 0 16px;padding:11px 12px;border:1px solid #58634b;border-radius:7px;background:#303a32;color:#d8e7a2;font-size:13px;line-height:1.45}
+.rematch-actions{display:flex;flex-direction:column;align-items:stretch;gap:8px;margin-bottom:8px}
+.rematch-actions .quiet-button{align-self:center}
+.premove-hint{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#303541;border-color:#505a68;color:#c9d0db}
+.premove-hint .quiet-button{flex:none;padding:3px 6px;color:#d5e57a}

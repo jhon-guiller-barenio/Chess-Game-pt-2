@@ -7,12 +7,19 @@ inject();
 const glyphs = {wk:'♔', wq:'♕', wr:'♖', wb:'♗', wn:'♘', wp:'♙', bk:'♚', bq:'♛', br:'♜', bb:'♝', bn:'♞', bp:'♟'};
 const pieceNames = {k:'king', q:'queen', r:'rook', b:'bishop', n:'knight', p:'pawn'};
 const app = document.querySelector('#app');
-const state = {room:null, color:null, token:null, selected:null, legal:[], busy:false, error:'', notice:'', promotion:null, history:[], loading:false};
+const state = {room:null, color:null, token:null, selected:null, legal:[], premove:null, busy:false, error:'', notice:'', promotion:null, history:[], loading:false};
 const roomId = () => location.pathname.match(/^\/room\/([A-Z2-9]{8})\/?$/i)?.[1]?.toUpperCase();
 const sessionKey = (id) => `chessroom:${id}`;
 const chess = () => new Chess(state.room?.fen);
+function premoveChess() {
+  const fields = (state.room?.fen || new Chess().fen()).split(' ');
+  fields[1] = state.color;
+  fields[3] = '-';
+  return new Chess(fields.join(' '));
+}
 const other = (color) => color === 'w' ? 'b' : 'w';
 const colorName = (color) => color === 'w' ? 'White' : 'Black';
+const isFinished = (room) => ['checkmate','stalemate','draw','resigned'].includes(room?.status);
 
 async function api(body) {
   let response;
@@ -29,7 +36,7 @@ function setSession(data) {
   state.color = data.color;
   state.token = data.playerToken;
   localStorage.setItem(sessionKey(data.room.id), JSON.stringify({color: data.color, token: data.playerToken}));
-  state.selected = null; state.legal = []; state.error = '';
+  state.selected = null; state.legal = []; state.premove = null; state.error = '';
 }
 function toast(message, isError = false) {
   state.error = isError ? message : '';
@@ -67,16 +74,30 @@ async function refresh() {
   if (!roomId()) return;
   try {
     const {room} = await api();
-    if (!state.room || room.version !== state.room.version) {state.room = room; state.selected = null; state.legal = []; state.error = ''; render();}
+    if (!state.room || room.version !== state.room.version) {
+      const previous = state.room;
+      state.room = room; state.selected = null; state.legal = []; state.error = '';
+      if (isFinished(room)) state.premove = null;
+      const turnChangedToMe = previous?.status === 'playing' && room.status === 'playing' && state.color && chess().turn() === state.color && new Chess(previous.fen).turn() !== state.color;
+      if (turnChangedToMe && state.premove && !state.busy) {
+        const queued = state.premove; state.premove = null;
+        render();
+        void sendMove(queued.from, queued.to, queued.promotion, true);
+        return;
+      }
+      render();
+    }
   } catch (e) {if (state.room) toast(e.message, true);}
 }
-async function sendMove(from, to, promotion = 'q') {
+async function sendMove(from, to, promotion = 'q', wasPremove = false) {
   state.promotion = null;
+  state.premove = null;
   state.busy = true; render();
   try {
     const {room} = await api({action:'move', roomId: state.room.id, playerToken: state.token, from, to, promotion, version: state.room.version});
     state.room = room; state.selected = null; state.legal = []; state.error = '';
-  } catch (e) {state.error = e.message; await refresh();}
+    if (wasPremove) state.notice = 'Premove played.';
+  } catch (e) {state.error = wasPremove ? `Premove canceled: ${e.message}` : e.message; await refresh();}
   state.busy = false; render();
 }
 async function resign() {
@@ -86,23 +107,37 @@ async function resign() {
   catch (e) {state.error = e.message; await refresh();}
   state.busy = false; render();
 }
+async function rematch(action) {
+  state.busy = true; render();
+  try {
+    const {room} = await api({action, roomId:state.room.id, playerToken:state.token});
+    state.room = room; state.premove = null; state.selected = null; state.legal = []; state.error = '';
+    state.notice = action === 'challenge' ? 'Rematch challenge sent.' : action === 'accept_rematch' ? 'Rematch accepted. New game started.' : 'Rematch declined.';
+  } catch (e) {state.error = e.message; await refresh();}
+  state.busy = false; render();
+}
 function onSquare(square) {
   const room = state.room;
   if (!room || room.status !== 'playing' || state.busy || !state.color) return;
-  const game = chess();
-  if (game.turn() !== state.color) return;
+  const isPremove = chess().turn() !== state.color;
+  const game = isPremove ? premoveChess() : chess();
   const piece = game.get(square);
   if (state.selected && state.legal.includes(square)) {
     const from = state.selected;
     const chosen = game.get(from);
-    if (chosen?.type === 'p' && (square[1] === '1' || square[1] === '8')) {state.promotion = {from, to:square}; render();}
+    if (isPremove) {
+      state.premove = {from, to:square, promotion:'q'};
+      state.selected = null; state.legal = []; state.notice = `Premove queued: ${from} to ${square}.`;
+      render();
+    } else if (chosen?.type === 'p' && (square[1] === '1' || square[1] === '8')) {state.promotion = {from, to:square}; render();}
     else sendMove(from, square);
     return;
   }
   if (piece?.color === state.color) {
     state.selected = square;
     state.legal = game.moves({square, verbose:true}).map(m => m.to);
-  } else {state.selected = null; state.legal = [];}
+  } else if (state.premove) {state.premove = null; state.selected = null; state.legal = []; state.notice = 'Premove cleared.';}
+  else {state.selected = null; state.legal = [];}
   render();
 }
 function boardHtml() {
@@ -117,7 +152,7 @@ function boardHtml() {
     const piece = game.get(sq);
     const dark = (file.charCodeAt(0) - 97 + rank) % 2 === 0;
     const legal = state.legal.includes(sq);
-    const classes = ['square', dark ? 'dark' : 'light', state.selected === sq ? 'selected' : '', last?.from === sq || last?.to === sq ? 'last-move' : '', legal ? 'legal' : '', checkSquare === sq ? 'in-check' : ''].filter(Boolean).join(' ');
+    const classes = ['square', dark ? 'dark' : 'light', state.selected === sq ? 'selected' : '', last?.from === sq || last?.to === sq ? 'last-move' : '', legal ? 'legal' : '', checkSquare === sq ? 'in-check' : '', state.premove?.from === sq || state.premove?.to === sq ? 'premove-square' : ''].filter(Boolean).join(' ');
     const name = piece ? `${colorName(piece.color)} ${pieceNames[piece.type]}` : 'empty';
     return `<button class="${classes}" data-square="${sq}" role="gridcell" aria-label="${sq}, ${name}" ${state.busy ? 'disabled' : ''}>
       ${fi === 0 ? `<span class="coord rank">${rank}</span>` : ''}${ri === 7 ? `<span class="coord file">${file}</span>` : ''}
@@ -141,8 +176,10 @@ function statusDescription() {
   const room = state.room;
   if (!room) return 'Create a private room, then invite a friend with a link.';
   if (room.status === 'waiting') return 'Send the link below to a friend. They will play Black.';
-  if (room.status !== 'playing') return 'Start a new room for another game.';
+  if (room.status !== 'playing') return room.rematch ? room.rematch.offeredBy === state.color ? 'Your rematch challenge is sent. Waiting for your opponent.' : `${colorName(room.rematch.offeredBy)} challenged you to another game.` : 'Challenge your opponent to play again in this room.';
   if (!state.color) return 'You are watching this game.';
+  if (state.premove) return `Premove queued: ${state.premove.from} to ${state.premove.to}.`;
+  if (chess().turn() !== state.color) return 'Queue a premove while your opponent is thinking.';
   return `You're playing ${colorName(state.color)}. ${chess().turn() === state.color ? 'Your move.' : 'Waiting for your opponent.'}`;
 }
 function playerRow(color, position) {
@@ -181,6 +218,8 @@ function render() {
           ${!room ? `<button class="primary-button" id="create" ${state.busy ? 'disabled':''}>${state.busy ? 'Creating…' : 'Create a game'} <span>↗</span></button>` : ''}
           ${room && !state.color && !room.joined ? `<button class="primary-button" id="join" ${state.busy ? 'disabled':''}>${state.busy ? 'Joining…' : 'Join as Black'} <span>↗</span></button>` : ''}
           ${room && !state.color && room.joined ? '<div class="spectator-note">This room is full. You can watch the game here.</div>' : ''}
+          ${room && isFinished(room) && state.color && room.joined ? room.rematch ? room.rematch.offeredBy === state.color ? '<div class="rematch-waiting" role="status">Rematch challenge sent · waiting for your opponent</div>' : `<div class="rematch-actions"><button class="primary-button" id="accept-rematch" ${state.busy ? 'disabled':''}>Accept rematch <span>↗</span></button><button id="decline-rematch" class="quiet-button" ${state.busy ? 'disabled':''}>Decline</button></div>` : `<button class="primary-button" id="challenge" ${state.busy ? 'disabled':''}>Challenge rematch <span>↗</span></button>` : ''}
+          ${room && room.status === 'playing' && state.color && chess().turn() !== state.color ? `<div class="premove-hint">${state.premove ? `Queued: ${state.premove.from} → ${state.premove.to}` : 'Premove: select one of your pieces and its destination.'}${state.premove ? '<button id="clear-premove" class="quiet-button">Clear</button>' : ''}</div>` : ''}
           ${room ? `<div class="share-label">INVITE LINK</div><div class="share-row"><input id="share-url" value="${escapeHtml(url)}" readonly aria-label="Invite link" /><button id="copy" title="Copy invite link" aria-label="Copy invite link">COPY</button></div>` : ''}
         </div>
         <div class="panel moves-panel"><div class="panel-head"><span class="panel-kicker">MOVE HISTORY</span><span class="move-count">${room?.moves.length ?? 0} MOVES</span></div><div class="move-list" id="move-list">${moveHistory()}</div></div>
@@ -194,6 +233,10 @@ function render() {
   document.querySelector('#join')?.addEventListener('click', joinRoom);
   document.querySelector('#copy')?.addEventListener('click', async () => {try {await navigator.clipboard.writeText(url); toast('Link copied. Send it to your friend.');} catch {document.querySelector('#share-url').select(); toast('Select and copy the link above.');}});
   document.querySelector('#resign')?.addEventListener('click', resign);
+  document.querySelector('#challenge')?.addEventListener('click', () => rematch('challenge'));
+  document.querySelector('#accept-rematch')?.addEventListener('click', () => rematch('accept_rematch'));
+  document.querySelector('#decline-rematch')?.addEventListener('click', () => rematch('decline_rematch'));
+  document.querySelector('#clear-premove')?.addEventListener('click', () => {state.premove = null; state.notice = 'Premove cleared.'; render();});
   document.querySelector('#new')?.addEventListener('click', () => {history.pushState({}, '', '/'); state.room = null; state.color = null; state.token = null; state.error = ''; state.notice = ''; state.selected = null; state.legal = []; render();});
   document.querySelectorAll('[data-square]').forEach(el => el.addEventListener('click', () => onSquare(el.dataset.square)));
   document.querySelectorAll('[data-promotion]').forEach(el => el.addEventListener('click', () => sendMove(state.promotion.from, state.promotion.to, el.dataset.promotion)));
