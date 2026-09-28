@@ -8,6 +8,7 @@ const memory = new Map();
 const dev = process.env.NODE_ENV !== 'production' && !process.env.VERCEL;
 const roomKey = (id) => `chessroom:v1:${id}`;
 const token = () => randomBytes(24).toString('hex');
+const randomSide = () => randomBytes(1)[0] < 128;
 const id = () => randomBytes(6).toString('base64url').toUpperCase().replace(/[^A-Z2-9]/g, '').padEnd(8, 'K').slice(0, 8);
 const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && TOKEN_RE.test(a) && TOKEN_RE.test(b) && timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 
@@ -78,13 +79,15 @@ export async function POST(request) {
     if (!room) return err('Room not found or expired.', 404);
     if (action === 'join') {
       if (room.black) return err('This room already has two players.', 409);
-      const black = token();
-      const next = {...room, black, status: 'playing', version: room.version + 1, updatedAt: Date.now()};
+      const joiningPlayer = token();
+      const joinerIsWhite = randomSide();
+      const next = {...room, white: joinerIsWhite ? joiningPlayer : room.white, black: joinerIsWhite ? room.white : joiningPlayer, status: 'playing', version: room.version + 1, updatedAt: Date.now()};
       if (!await updateRoom(room, next)) return err('Someone joined first. Refresh the room.', 409);
-      return json({room: publicRoom(next), color: 'b', playerToken: black});
+      return json({room: publicRoom(next), color: joinerIsWhite ? 'w' : 'b', playerToken: joiningPlayer});
     }
     const color = equal(playerToken, room.white) ? 'w' : equal(playerToken, room.black) ? 'b' : null;
     if (!color) return err('You are not a player in this room.', 403);
+    if (action === 'sync') return json({room: publicRoom(room), color});
     if (action === 'challenge') {
       if (!finished(room.status)) return err('A rematch can only be offered after the game ends.', 409);
       if (room.rematch) return err('A rematch challenge is already waiting for a response.', 409);
@@ -95,9 +98,10 @@ export async function POST(request) {
     if (action === 'accept_rematch') {
       if (!finished(room.status) || !room.rematch) return err('There is no rematch challenge to accept.', 409);
       if (room.rematch.offeredBy === color) return err('Your opponent needs to accept the challenge.', 403);
-      const next = {...room, fen: new Chess().fen(), moves: [], status: 'playing', winner: null, rematch: null, version: room.version + 1, updatedAt: Date.now()};
+      const switchColors = randomSide();
+      const next = {...room, white: switchColors ? room.black : room.white, black: switchColors ? room.white : room.black, fen: new Chess().fen(), moves: [], status: 'playing', winner: null, rematch: null, version: room.version + 1, updatedAt: Date.now()};
       if (!await updateRoom(room, next)) return err('The room changed. Try again.', 409);
-      return json({room: publicRoom(next)});
+      return json({room: publicRoom(next), color: equal(playerToken, next.white) ? 'w' : 'b'});
     }
     if (action === 'decline_rematch') {
       if (!finished(room.status) || !room.rematch) return err('There is no rematch challenge to decline.', 409);

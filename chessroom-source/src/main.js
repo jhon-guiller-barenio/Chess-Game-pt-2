@@ -51,7 +51,8 @@ async function load() {
     const saved = JSON.parse(localStorage.getItem(sessionKey(id)) || 'null');
     state.color = saved?.color || null;
     state.token = saved?.token || null;
-    const {room} = await api(); state.room = room; state.error = '';
+    const {room,color} = state.token ? await api({action:'sync',roomId:id,playerToken:state.token}) : await api();
+    state.room = room; state.color = color || state.color; state.error = '';
   } catch (e) {state.error = e.message; state.room = null;}
   state.loading = false; render();
 }
@@ -73,8 +74,13 @@ async function joinRoom() {
 async function refresh() {
   if (!roomId()) return;
   try {
-    const {room} = await api();
-    if (!state.room || room.version !== state.room.version) {
+    const {room,color} = state.token ? await api({action:'sync',roomId:state.room.id,playerToken:state.token}) : await api();
+    const colorChanged = Boolean(color && state.color !== color);
+    if (color) {
+      state.color = color;
+      localStorage.setItem(sessionKey(room.id),JSON.stringify({color,token:state.token}));
+    }
+    if (!state.room || room.version !== state.room.version || colorChanged) {
       const previous = state.room;
       state.room = room; state.selected = null; state.legal = []; state.error = '';
       if (isFinished(room)) state.premove = null;
@@ -110,7 +116,11 @@ async function resign() {
 async function rematch(action) {
   state.busy = true; render();
   try {
-    const {room} = await api({action, roomId:state.room.id, playerToken:state.token});
+    const {room,color} = await api({action, roomId:state.room.id, playerToken:state.token});
+    if (color) {
+      state.color = color;
+      localStorage.setItem(sessionKey(room.id),JSON.stringify({color,token:state.token}));
+    }
     state.room = room; state.premove = null; state.selected = null; state.legal = []; state.error = '';
     state.notice = action === 'challenge' ? 'Rematch challenge sent.' : action === 'accept_rematch' ? 'Rematch accepted. New game started.' : 'Rematch declined.';
   } catch (e) {state.error = e.message; await refresh();}
@@ -175,7 +185,7 @@ function status() {
 function statusDescription() {
   const room = state.room;
   if (!room) return 'Create a private room, then invite a friend with a link.';
-  if (room.status === 'waiting') return 'Send the link below to a friend. They will play Black.';
+  if (room.status === 'waiting') return 'Share the link with a friend. Player colors are randomized when they join.';
   if (room.status !== 'playing') return room.rematch ? room.rematch.offeredBy === state.color ? 'Your rematch challenge is sent. Waiting for your opponent.' : `${colorName(room.rematch.offeredBy)} challenged you to another game.` : 'Challenge your opponent to play again in this room.';
   if (!state.color) return 'You are watching this game.';
   if (state.premove) return `Premove queued: ${state.premove.from} to ${state.premove.to}.`;
@@ -216,7 +226,7 @@ function render() {
           ${state.notice ? `<div class="message" role="status">${escapeHtml(state.notice)}</div>` : ''}
           ${state.loading ? '<div class="loading">Loading room…</div>' : ''}
           ${!room ? `<button class="primary-button" id="create" ${state.busy ? 'disabled':''}>${state.busy ? 'Creating…' : 'Create a game'} <span>↗</span></button>` : ''}
-          ${room && !state.color && !room.joined ? `<button class="primary-button" id="join" ${state.busy ? 'disabled':''}>${state.busy ? 'Joining…' : 'Join as Black'} <span>↗</span></button>` : ''}
+          ${room && !state.color && !room.joined ? `<button class="primary-button" id="join" ${state.busy ? 'disabled':''}>${state.busy ? 'Joining…' : 'Join game'} <span>↗</span></button>` : ''}
           ${room && !state.color && room.joined ? '<div class="spectator-note">This room is full. You can watch the game here.</div>' : ''}
           ${room && isFinished(room) && state.color && room.joined ? room.rematch ? room.rematch.offeredBy === state.color ? '<div class="rematch-waiting" role="status">Rematch challenge sent · waiting for your opponent</div>' : `<div class="rematch-actions"><button class="primary-button" id="accept-rematch" ${state.busy ? 'disabled':''}>Accept rematch <span>↗</span></button><button id="decline-rematch" class="quiet-button" ${state.busy ? 'disabled':''}>Decline</button></div>` : `<button class="primary-button" id="challenge" ${state.busy ? 'disabled':''}>Challenge rematch <span>↗</span></button>` : ''}
           ${room && room.status === 'playing' && state.color && chess().turn() !== state.color ? `<div class="premove-hint">${state.premove ? `Queued: ${state.premove.from} → ${state.premove.to}` : 'Premove: select one of your pieces and its destination.'}${state.premove ? '<button id="clear-premove" class="quiet-button">Clear</button>' : ''}</div>` : ''}
