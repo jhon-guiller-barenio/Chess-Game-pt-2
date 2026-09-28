@@ -44,8 +44,9 @@ async function updateRoom(before, after) {
   return await redis('EVAL', CAS, 1, roomKey(before.id), JSON.stringify(before), JSON.stringify(after), TTL) === 1;
 }
 function publicRoom(room) {
-  return {id: room.id, fen: room.fen, moves: room.moves, status: room.status, winner: room.winner, joined: Boolean(room.black), version: room.version, updatedAt: room.updatedAt};
+  return {id: room.id, fen: room.fen, moves: room.moves, status: room.status, winner: room.winner, rematch: room.rematch ?? null, joined: Boolean(room.black), version: room.version, updatedAt: room.updatedAt};
 }
+const finished = (status) => ['checkmate', 'stalemate', 'draw', 'resigned'].includes(status);
 function json(data, status = 200) { return new Response(JSON.stringify(data), {status, headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-store'}}); }
 function err(message, status) { return json({error: message}, status); }
 
@@ -66,7 +67,7 @@ export async function POST(request) {
       for (let tries = 0; tries < 5; tries++) {
         const roomId = id();
         const white = token();
-        const room = {id: roomId, fen: new Chess().fen(), moves: [], status: 'waiting', winner: null, white, black: null, version: 0, updatedAt: Date.now()};
+        const room = {id: roomId, fen: new Chess().fen(), moves: [], status: 'waiting', winner: null, rematch: null, white, black: null, version: 0, updatedAt: Date.now()};
         if (await createRoom(room)) return json({room: publicRoom(room), color: 'w', playerToken: white}, 201);
       }
       return err('Could not create a room. Try again.', 503);
@@ -84,6 +85,27 @@ export async function POST(request) {
     }
     const color = equal(playerToken, room.white) ? 'w' : equal(playerToken, room.black) ? 'b' : null;
     if (!color) return err('You are not a player in this room.', 403);
+    if (action === 'challenge') {
+      if (!finished(room.status)) return err('A rematch can only be offered after the game ends.', 409);
+      if (room.rematch) return err('A rematch challenge is already waiting for a response.', 409);
+      const next = {...room, rematch: {offeredBy: color}, version: room.version + 1, updatedAt: Date.now()};
+      if (!await updateRoom(room, next)) return err('The room changed. Try again.', 409);
+      return json({room: publicRoom(next)});
+    }
+    if (action === 'accept_rematch') {
+      if (!finished(room.status) || !room.rematch) return err('There is no rematch challenge to accept.', 409);
+      if (room.rematch.offeredBy === color) return err('Your opponent needs to accept the challenge.', 403);
+      const next = {...room, fen: new Chess().fen(), moves: [], status: 'playing', winner: null, rematch: null, version: room.version + 1, updatedAt: Date.now()};
+      if (!await updateRoom(room, next)) return err('The room changed. Try again.', 409);
+      return json({room: publicRoom(next)});
+    }
+    if (action === 'decline_rematch') {
+      if (!finished(room.status) || !room.rematch) return err('There is no rematch challenge to decline.', 409);
+      if (room.rematch.offeredBy === color) return err('Only your opponent can decline this challenge.', 403);
+      const next = {...room, rematch: null, version: room.version + 1, updatedAt: Date.now()};
+      if (!await updateRoom(room, next)) return err('The room changed. Try again.', 409);
+      return json({room: publicRoom(next)});
+    }
     if (action === 'move') {
       if (room.status !== 'playing') return err('The game is not in progress.', 409);
       if (room.version !== version) return err('The board changed. Try your move again.', 409);
