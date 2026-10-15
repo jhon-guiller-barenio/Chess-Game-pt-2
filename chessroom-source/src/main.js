@@ -200,7 +200,7 @@ function render() {
   const flipped = state.color === 'b';
   const url = room ? `${location.origin}/room/${room.id}` : '';
   app.innerHTML = `<div class="app-shell">
-    <header class="topbar"><a class="brand" href="/" aria-label="Chessroom home"><span class="brand-icon">♞</span><span>chessroom<span class="brand-period">.</span></span></a><span class="topbar-right">PLAY TOGETHER, ANYWHERE <span class="topbar-line"></span> ♙</span></header>
+    <header class="topbar"><a class="brand" href="/" aria-label="Chessroom home"><img class="brand-icon" src="/logo.svg" alt="" /><span>chessroom<span class="brand-period">.</span></span></a><span class="topbar-right">PLAY TOGETHER, ANYWHERE <span class="topbar-line"></span> ♙</span></header>
     <main class="main-layout">
       <section class="game-area" aria-label="Game">
         <div class="game-heading"><div><div class="eyebrow">${room ? `ROOM ${room.id}` : 'A GAME BETWEEN FRIENDS'}</div><h1>${room ? 'The board is yours.' : 'Make your move.'}</h1></div><div class="game-indicator"><span class="indicator-orb"></span>${room ? room.status === 'waiting' ? 'Waiting' : room.status === 'playing' ? 'In progress' : 'Finished' : 'New game'}</div></div>
