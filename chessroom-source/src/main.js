@@ -7,7 +7,7 @@ inject();
 const glyphs = {wk:'♔', wq:'♕', wr:'♖', wb:'♗', wn:'♘', wp:'♙', bk:'♚', bq:'♛', br:'♜', bb:'♝', bn:'♞', bp:'♟'};
 const pieceNames = {k:'king', q:'queen', r:'rook', b:'bishop', n:'knight', p:'pawn'};
 const app = document.querySelector('#app');
-const state = {room:null, color:null, token:null, selected:null, legal:[], premove:null, busy:false, error:'', notice:'', promotion:null, history:[], loading:false};
+const state = {room:null, color:null, playerId:null, token:null, clockChoice:5, selected:null, legal:[], premove:null, busy:false, error:'', notice:'', promotion:null, history:[], loading:false};
 const roomId = () => location.pathname.match(/^\/room\/([A-Z2-9]{8})\/?$/i)?.[1]?.toUpperCase();
 const sessionKey = (id) => `chessroom:${id}`;
 const chess = () => new Chess(state.room?.fen);
@@ -24,7 +24,7 @@ const isFinished = (room) => ['checkmate','stalemate','draw','resigned'].include
 async function api(body) {
   let response;
   try {
-    response = await fetch('/api/rooms' + (body ? '' : `?id=${encodeURIComponent(roomId())}`), {method: body ? 'POST' : 'GET', headers: body ? {'Content-Type':'application/json'} : undefined, body: body ? JSON.stringify(body) : undefined, cache: 'no-store'});
+    response = await fetch('/api/rooms' + (body ? '' : `?id=${encodeURIComponent(roomId())}`), {method: body ? 'POST' : 'GET', headers: body ? {'Content-Type':'application/json'} : state.token ? {'x-player-token':state.token} : undefined, body: body ? JSON.stringify(body) : undefined, cache: 'no-store'});
   } catch { throw new Error('Cannot reach the game server. Check your connection.'); }
   let data;
   try { data = await response.json(); } catch { throw new Error('The game server did not respond correctly.'); }
@@ -34,8 +34,9 @@ async function api(body) {
 function setSession(data) {
   state.room = data.room;
   state.color = data.color;
+  state.playerId = data.playerId;
   state.token = data.playerToken;
-  localStorage.setItem(sessionKey(data.room.id), JSON.stringify({color: data.color, token: data.playerToken}));
+  localStorage.setItem(sessionKey(data.room.id), JSON.stringify({playerId: data.playerId, token: data.playerToken}));
   state.selected = null; state.legal = []; state.premove = null; state.error = '';
 }
 function toast(message, isError = false) {
@@ -49,16 +50,16 @@ async function load() {
   state.loading = true; render();
   try {
     const saved = JSON.parse(localStorage.getItem(sessionKey(id)) || 'null');
-    state.color = saved?.color || null;
+    state.playerId = saved?.playerId || null;
     state.token = saved?.token || null;
-    const {room} = await api(); state.room = room; state.error = '';
+    const {room, color, playerId} = await api(); state.room = room; state.color = color || null; state.playerId = playerId || state.playerId; state.error = '';
   } catch (e) {state.error = e.message; state.room = null;}
   state.loading = false; render();
 }
 async function createRoom() {
   state.busy = true; render();
   try {
-    const data = await api({action:'create'});
+    const data = await api({action:'create', timeMinutes:state.clockChoice});
     history.pushState({}, '', `/room/${data.room.id}`);
     setSession(data);
   } catch (e) {state.error = e.message;}
@@ -73,7 +74,9 @@ async function joinRoom() {
 async function refresh() {
   if (!roomId()) return;
   try {
-    const {room} = await api();
+    const {room, color, playerId} = await api();
+    if (color) state.color = color;
+    if (playerId) state.playerId = playerId;
     if (!state.room || room.version !== state.room.version) {
       const previous = state.room;
       state.room = room; state.selected = null; state.legal = []; state.error = '';
@@ -110,8 +113,8 @@ async function resign() {
 async function rematch(action) {
   state.busy = true; render();
   try {
-    const {room} = await api({action, roomId:state.room.id, playerToken:state.token});
-    state.room = room; state.premove = null; state.selected = null; state.legal = []; state.error = '';
+    const {room, color, playerId} = await api({action, roomId:state.room.id, playerToken:state.token});
+    state.room = room; if (color) state.color = color; if (playerId) state.playerId = playerId; state.premove = null; state.selected = null; state.legal = []; state.error = '';
     state.notice = action === 'challenge' ? 'Rematch challenge sent.' : action === 'accept_rematch' ? 'Rematch accepted. New game started.' : 'Rematch declined.';
   } catch (e) {state.error = e.message; await refresh();}
   state.busy = false; render();
@@ -167,6 +170,7 @@ function status() {
   if (room.status === 'waiting') return 'Waiting for your opponent';
   if (room.status === 'checkmate') return `Checkmate · ${colorName(room.winner)} wins`;
   if (room.status === 'resigned') return `${colorName(room.winner)} wins by resignation`;
+  if (room.status === 'timeout') return `${colorName(room.winner)} wins on time`;
   if (room.status === 'stalemate') return 'Draw by stalemate';
   if (room.status === 'draw') return 'Game drawn';
   const game = chess();
@@ -175,7 +179,7 @@ function status() {
 function statusDescription() {
   const room = state.room;
   if (!room) return 'Create a private room, then invite a friend with a link.';
-  if (room.status === 'waiting') return 'Send the link below to a friend. They will play Black.';
+  if (room.status === 'waiting') return 'Send the link below to a friend. They will get the other color.';
   if (room.status !== 'playing') return room.rematch ? room.rematch.offeredBy === state.color ? 'Your rematch challenge is sent. Waiting for your opponent.' : `${colorName(room.rematch.offeredBy)} challenged you to another game.` : 'Challenge your opponent to play again in this room.';
   if (!state.color) return 'You are watching this game.';
   if (state.premove) return `Premove queued: ${state.premove.from} to ${state.premove.to}.`;
@@ -184,8 +188,29 @@ function statusDescription() {
 }
 function playerRow(color, position) {
   const isTurn = state.room?.status === 'playing' && chess().turn() === color;
-  const isEmpty = color === 'b' && !state.room?.joined;
-  return `<div class="player-row ${isTurn ? 'active-turn' : ''}"><div class="avatar ${color === 'w' ? 'white-avatar' : 'black-avatar'}">${glyphs[color+'n']}</div><div class="player-label"><strong>${isEmpty ? 'Waiting for player' : colorName(color)}</strong><span>${state.color === color ? 'You' : isEmpty ? 'Share the room link' : 'Opponent'}</span></div><span class="player-pos">${position}</span>${isTurn ? '<span class="turn-mark" title="Current turn"></span>' : ''}</div>`;
+  const role = state.room?.whitePlayer === 'one' ? (color === 'w' ? 'one' : 'two') : (color === 'w' ? 'two' : 'one');
+  const isEmpty = role === 'two' && !state.room?.joined;
+  const isYou = Boolean(state.playerId && role === state.playerId);
+  return `<div class="player-row ${isTurn ? 'active-turn' : ''}"><div class="avatar ${color === 'w' ? 'white-avatar' : 'black-avatar'}">${glyphs[color+'n']}</div><div class="player-label"><strong>${isEmpty ? 'Waiting for player' : colorName(color)}</strong><span>${isYou ? 'You' : isEmpty ? 'Share the room link' : 'Opponent'}</span></div><span class="clock-display ${isTurn ? 'clock-active' : ''}" id="clock-${role}" aria-label="${isEmpty ? 'Waiting player' : colorName(color)} clock">${formatClock(clockRemaining(role))}</span><span class="player-pos">${position}</span>${isTurn ? '<span class="turn-mark" title="Current turn"></span>' : ''}</div>`;
+}
+function clockRemaining(playerId) {
+  if (!state.room) return null;
+  const value = state.room.clocks?.[playerId] ?? state.room.clockMs ?? 0;
+  if (state.room.status !== 'playing' || !state.room.clockStartedAt) return value;
+  const activeRole = roleForColor(state.room, chess().turn());
+  return activeRole === playerId ? Math.max(0, value - (Date.now() - state.room.clockStartedAt)) : value;
+}
+function roleForColor(room, color) {return (room.whitePlayer === 'one') === (color === 'w') ? 'one' : 'two';}
+function formatClock(milliseconds) {
+  if (milliseconds === null) return '—:——';
+  const seconds = Math.ceil(milliseconds / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2,'0')}`;
+}
+function tickClocks() {
+  for (const role of ['one','two']) {
+    const element = document.querySelector(`#clock-${role}`);
+    if (element) element.textContent = formatClock(clockRemaining(role));
+  }
 }
 function moveHistory() {
   const moves = state.room?.moves ?? [];
@@ -215,8 +240,8 @@ function render() {
           ${state.error ? `<div class="message error" role="alert">${escapeHtml(state.error)}</div>` : ''}
           ${state.notice ? `<div class="message" role="status">${escapeHtml(state.notice)}</div>` : ''}
           ${state.loading ? '<div class="loading">Loading room…</div>' : ''}
-          ${!room ? `<button class="primary-button" id="create" ${state.busy ? 'disabled':''}>${state.busy ? 'Creating…' : 'Create a game'} <span>↗</span></button>` : ''}
-          ${room && !state.color && !room.joined ? `<button class="primary-button" id="join" ${state.busy ? 'disabled':''}>${state.busy ? 'Joining…' : 'Join as Black'} <span>↗</span></button>` : ''}
+          ${!room ? `<div class="clock-choice"><label for="time-control">CHOOSE CLOCK</label><select id="time-control" ${state.busy ? 'disabled':''}><option value="2" ${state.clockChoice === 2 ? 'selected':''}>2 minutes</option><option value="5" ${state.clockChoice === 5 ? 'selected':''}>5 minutes</option><option value="10" ${state.clockChoice === 10 ? 'selected':''}>10 minutes</option></select></div><button class="primary-button" id="create" ${state.busy ? 'disabled':''}>${state.busy ? 'Creating…' : 'Create a game'} <span>↗</span></button>` : `<div class="clock-setting"><span>CHESS CLOCK</span><strong>${Math.round(room.clockMs / 60000)} minutes each</strong></div>`}
+          ${room && !state.color && !room.joined ? `<button class="primary-button" id="join" ${state.busy ? 'disabled':''}>${state.busy ? 'Joining…' : 'Join game'} <span>↗</span></button>` : ''}
           ${room && !state.color && room.joined ? '<div class="spectator-note">This room is full. You can watch the game here.</div>' : ''}
           ${room && isFinished(room) && state.color && room.joined ? room.rematch ? room.rematch.offeredBy === state.color ? '<div class="rematch-waiting" role="status">Rematch challenge sent · waiting for your opponent</div>' : `<div class="rematch-actions"><button class="primary-button" id="accept-rematch" ${state.busy ? 'disabled':''}>Accept rematch <span>↗</span></button><button id="decline-rematch" class="quiet-button" ${state.busy ? 'disabled':''}>Decline</button></div>` : `<button class="primary-button" id="challenge" ${state.busy ? 'disabled':''}>Challenge rematch <span>↗</span></button>` : ''}
           ${room && room.status === 'playing' && state.color && chess().turn() !== state.color ? `<div class="premove-hint">${state.premove ? `Queued: ${state.premove.from} → ${state.premove.to}` : 'Premove: select one of your pieces and its destination.'}${state.premove ? '<button id="clear-premove" class="quiet-button">Clear</button>' : ''}</div>` : ''}
@@ -230,6 +255,7 @@ function render() {
   </div>
   ${state.promotion ? `<div class="modal-backdrop"><div class="promotion-dialog" role="dialog" aria-modal="true" aria-labelledby="promote-title"><h2 id="promote-title">Choose promotion</h2><p>What should your pawn become?</p><div class="promotion-options">${['q','r','b','n'].map(p => `<button data-promotion="${p}" aria-label="Promote to ${pieceNames[p]}">${glyphs[state.color+p]}</button>`).join('')}</div><button class="quiet-button" id="cancel-promotion">Cancel</button></div></div>` : ''}`;
   document.querySelector('#create')?.addEventListener('click', createRoom);
+  document.querySelector('#time-control')?.addEventListener('change', event => {state.clockChoice = Number(event.target.value);});
   document.querySelector('#join')?.addEventListener('click', joinRoom);
   document.querySelector('#copy')?.addEventListener('click', async () => {try {await navigator.clipboard.writeText(url); toast('Link copied. Send it to your friend.');} catch {document.querySelector('#share-url').select(); toast('Select and copy the link above.');}});
   document.querySelector('#resign')?.addEventListener('click', resign);
@@ -237,7 +263,7 @@ function render() {
   document.querySelector('#accept-rematch')?.addEventListener('click', () => rematch('accept_rematch'));
   document.querySelector('#decline-rematch')?.addEventListener('click', () => rematch('decline_rematch'));
   document.querySelector('#clear-premove')?.addEventListener('click', () => {state.premove = null; state.notice = 'Premove cleared.'; render();});
-  document.querySelector('#new')?.addEventListener('click', () => {history.pushState({}, '', '/'); state.room = null; state.color = null; state.token = null; state.error = ''; state.notice = ''; state.selected = null; state.legal = []; render();});
+  document.querySelector('#new')?.addEventListener('click', () => {history.pushState({}, '', '/'); state.room = null; state.color = null; state.playerId = null; state.token = null; state.error = ''; state.notice = ''; state.selected = null; state.legal = []; render();});
   document.querySelectorAll('[data-square]').forEach(el => el.addEventListener('click', () => onSquare(el.dataset.square)));
   document.querySelectorAll('[data-promotion]').forEach(el => el.addEventListener('click', () => sendMove(state.promotion.from, state.promotion.to, el.dataset.promotion)));
   document.querySelector('#cancel-promotion')?.addEventListener('click', () => {state.promotion = null; render();});
@@ -245,4 +271,5 @@ function render() {
 }
 window.addEventListener('popstate', load);
 setInterval(() => {if (state.room && !state.busy) refresh();}, 1800);
+setInterval(tickClocks, 250);
 load();

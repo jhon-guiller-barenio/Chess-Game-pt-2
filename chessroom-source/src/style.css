@@ -12,3 +12,11 @@
 .rematch-actions .quiet-button{align-self:center}
 .premove-hint{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#303541;border-color:#505a68;color:#c9d0db}
 .premove-hint .quiet-button{flex:none;padding:3px 6px;color:#d5e57a}
+.clock-display{min-width:54px;padding:6px 8px;border:1px solid #3b4655;border-radius:6px;background:#202734;color:#e9edf2;text-align:center;font:700 16px 'Space Grotesk',sans-serif;font-variant-numeric:tabular-nums;letter-spacing:.2px}
+.clock-display.clock-active{background:#d5e57a;border-color:#d5e57a;color:#1c262b}
+.clock-choice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;padding:12px;border:1px solid #3d4857;border-radius:7px;background:#202734}
+.clock-choice label,.clock-setting span{font:700 10px 'Space Grotesk',sans-serif;letter-spacing:1.1px;color:#aab4c1}
+.clock-choice select{min-width:130px;padding:9px 30px 9px 11px;border:1px solid #556172;border-radius:6px;background:#293342;color:#edf1f5;font:600 13px 'DM Sans',sans-serif}
+.clock-choice select:focus{outline:2px solid #d5e57a;outline-offset:2px}
+.clock-setting{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 18px;padding:12px;border:1px solid #3d4857;border-radius:7px;background:#202734}
+.clock-setting strong{font:700 13px 'Space Grotesk',sans-serif;color:#e4ecbf}
